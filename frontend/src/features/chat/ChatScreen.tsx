@@ -85,14 +85,19 @@ export const ChatScreen = () => {
   }, []);
 
   useEffect(() => {
+    if (!username) return;
+
     const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
     const explicitSocketUrl = env?.VITE_SOCKET_URL?.trim();
     const apiUrl = env?.VITE_API_URL?.trim();
     const derivedSocketUrl = explicitSocketUrl || (apiUrl && /^https?:\/\//i.test(apiUrl) ? apiUrl.replace(/\/api\/?$/i, '').replace(/\/$/, '') : undefined);
+
     const socket = io(derivedSocketUrl, {
       auth: { username },
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
+      transports: ['websocket', 'polling'],
+      forceNew: false,
     });
     socketRef.current = socket;
 
@@ -102,7 +107,10 @@ export const ChatScreen = () => {
     });
     socket.on('connect_error', () => setConnectionState('disconnected'));
     socket.on('reconnecting', () => setConnectionState('reconnecting'));
-    socket.on('reconnect', () => setConnectionState('connected'));
+    socket.on('reconnect', () => {
+      setConnectionState('connected');
+      socket.emit('join', username);
+    });
     socket.on('receive_message', (message: MessageItem) => {
       upsertMessage(message);
     });
@@ -114,7 +122,10 @@ export const ChatScreen = () => {
     });
     socket.on('user_online', ({ username: activeUsername }: { username: string }) => {
       setOnlineUsers((prev) => {
-        if (prev.some((user) => user.username === activeUsername)) return prev;
+        const existing = prev.find((user) => user.username === activeUsername);
+        if (existing) {
+          return prev.map((user) => (user.username === activeUsername ? { ...user, isOnline: true, lastSeen: new Date().toISOString() } : user))
+        }
         return [...prev, { username: activeUsername, isOnline: true, lastSeen: new Date().toISOString() }];
       });
     });
@@ -124,8 +135,9 @@ export const ChatScreen = () => {
 
     return () => {
       socket.disconnect();
+      socketRef.current = null;
     };
-  }, [username, typingUser]);
+  }, [username]);
 
   useEffect(() => {
     messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight, behavior: 'smooth' });

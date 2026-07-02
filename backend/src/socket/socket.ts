@@ -5,17 +5,20 @@ import { Message } from '../models/message.model.js';
 export const registerSocketHandlers = (io: Server) => {
   io.on('connection', (socket: Socket) => {
     const username = socket.handshake.auth.username as string | undefined;
+    const normalizedAuthUsername = typeof username === 'string' ? username.trim().toLowerCase() : '';
 
-    if (username) {
+    if (normalizedAuthUsername) {
+      socket.data.username = normalizedAuthUsername;
+      socket.data.socketId = socket.id;
       void User.findOneAndUpdate(
-        { username: username.toLowerCase() },
+        { username: normalizedAuthUsername },
         { isOnline: true, lastSeen: new Date() },
         { upsert: true, new: true },
       );
     }
 
     socket.on('join', async (userName: string) => {
-      const normalized = userName.trim().toLowerCase();
+      const normalized = String(userName || '').trim().toLowerCase();
       if (!normalized) return;
 
       await User.findOneAndUpdate(
@@ -26,6 +29,7 @@ export const registerSocketHandlers = (io: Server) => {
 
       socket.join(normalized);
       socket.data.username = normalized;
+      socket.data.socketId = socket.id;
       io.emit('user_online', { username: normalized });
       io.emit('presence_update', { username: normalized, isOnline: true, lastSeen: new Date() });
     });
