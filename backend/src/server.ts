@@ -78,6 +78,15 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/', (_req, res) => {
+    res.status(200).json({
+        success: true,
+        message: 'Real-Time Chat Backend API is running successfully.',
+        status: 'OK',
+        version: '1.0.0'
+    });
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/users', userRoutes);
