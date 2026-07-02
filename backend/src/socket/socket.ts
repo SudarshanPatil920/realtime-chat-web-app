@@ -61,6 +61,7 @@ export const registerSocketHandlers = (io: Server) => {
     socket.on('disconnect', async () => {
       const currentUsername = typeof socket.data.username === 'string' ? socket.data.username : undefined;
       if (currentUsername) {
+        socket.broadcast.emit('typing_stop', { username: currentUsername });
         await User.findOneAndUpdate(
           { username: currentUsername },
           { isOnline: false, lastSeen: new Date() },

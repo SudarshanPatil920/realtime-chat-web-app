@@ -35,14 +35,32 @@ export const ChatScreen = () => {
   const socketRef = useRef<Socket | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const statusTimeoutsRef = useRef<number[]>([]);
+  const typingTimeoutRef = useRef<number | null>(null);
+  const isTypingRef = useRef(false);
   const clearSession = useAuthStore((s) => s.clearSession);
   const navigate = useNavigate();
 
   useEffect(() => {
     return () => {
       statusTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
     };
   }, []);
+
+  const clearTypingTimeout = () => {
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+  };
+
+  const emitTypingStop = (force = false) => {
+    clearTypingTimeout();
+    if ((isTypingRef.current || force) && username) {
+      socketRef.current?.emit('typing_stop', { username });
+    }
+    isTypingRef.current = false;
+  };
 
   const upsertMessage = (incomingMessage: MessageItem) => {
     setMessages((prev) => {
@@ -118,7 +136,11 @@ export const ChatScreen = () => {
       if (activeUsername !== username) setTypingUser(activeUsername);
     });
     socket.on('typing_stop', ({ username: activeUsername }: { username: string }) => {
-      if (activeUsername === typingUser) setTypingUser(null);
+      setTypingUser((currentTypingUser) => (activeUsername === currentTypingUser ? null : currentTypingUser));
+    });
+    socket.on('disconnect', () => {
+      setConnectionState('disconnected');
+      setTypingUser(null);
     });
     socket.on('user_online', ({ username: activeUsername }: { username: string }) => {
       setOnlineUsers((prev) => {
@@ -134,6 +156,7 @@ export const ChatScreen = () => {
     });
 
     return () => {
+      emitTypingStop(true);
       socket.disconnect();
       socketRef.current = null;
     };
@@ -157,7 +180,7 @@ export const ChatScreen = () => {
 
     setMessages((prev) => [...prev, optimisticMessage]);
     setDraft('');
-    socketRef.current?.emit('typing_stop', { username });
+    emitTypingStop(true);
 
     socketRef.current?.emit('send_message', { username, message: trimmed }, (createdMessage: MessageItem) => {
       upsertMessage({ ...createdMessage, status: 'delivered' });
@@ -174,11 +197,16 @@ export const ChatScreen = () => {
 
   const handleDraftChange = (value: string) => {
     setDraft(value);
-    if (!socketRef.current) return;
+    if (!socketRef.current || !username) return;
+    clearTypingTimeout();
     if (value.trim()) {
-      socketRef.current.emit('typing_start', { username });
+      if (!isTypingRef.current) {
+        socketRef.current.emit('typing_start', { username });
+        isTypingRef.current = true;
+      }
+      typingTimeoutRef.current = window.setTimeout(() => emitTypingStop(true), 1000);
     } else {
-      socketRef.current.emit('typing_stop', { username });
+      emitTypingStop(true);
     }
   };
 
@@ -192,16 +220,16 @@ export const ChatScreen = () => {
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-3 py-3 sm:px-4 lg:px-6">
         <motion.header initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className={`rounded-[24px] border px-4 py-4 shadow-lg backdrop-blur ${isDark ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white/80'}`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="rounded-2xl bg-gradient-to-r from-cyan-500 to-violet-500 p-3 text-white">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="shrink-0 rounded-2xl bg-gradient-to-r from-cyan-500 to-violet-500 p-3 text-white">
                 <Sparkles size={18} />
               </div>
-              <div>
-                <p className="text-lg font-semibold">NovaChat</p>
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Realtime • Secure • Beautiful</p>
+              <div className="min-w-0">
+                <p className="truncate text-lg font-semibold">NovaChat</p>
+                <p className={`truncate text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Realtime • Secure • Beautiful</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <div className={`flex items-center gap-2 rounded-full px-3 py-2 text-sm ${isDark ? 'bg-slate-800/80' : 'bg-slate-100'}`}>
                 {connectionState === 'connected' ? <Wifi size={16} className="text-emerald-400" /> : connectionState === 'reconnecting' ? <Wifi size={16} className="text-amber-400" /> : <WifiOff size={16} className="text-rose-400" />}
                 {connectionState === 'connected' ? 'Connected' : connectionState === 'reconnecting' ? 'Reconnecting' : 'Disconnected'}
@@ -220,7 +248,7 @@ export const ChatScreen = () => {
                   clearSession();
                   navigate('/');
                 }}
-                className={`ml-2 rounded-full px-3 py-1 text-sm ${isDark ? 'bg-slate-800/70 text-slate-200' : 'bg-slate-100 text-slate-700'}`}
+                className={`rounded-full px-3 py-2 text-sm sm:ml-2 ${isDark ? 'bg-slate-800/70 text-slate-200' : 'bg-slate-100 text-slate-700'}`}
               >
                 Logout
               </button>
@@ -231,25 +259,25 @@ export const ChatScreen = () => {
         <main className="mt-4 grid flex-1 gap-4 lg:grid-cols-[1.15fr_0.35fr]">
           <section className={`flex min-h-[70vh] flex-col overflow-hidden rounded-[28px] border shadow-xl ${isDark ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white/90'}`}>
             <div className={`border-b px-4 py-3 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold">{currentUser}</p>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{typingUser ? `${typingUser} is typing...` : 'Ready to collaborate'}</p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{currentUser}</p>
+                  <p className={`truncate text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{typingUser ? `${typingUser} is typing...` : 'Ready to collaborate'}</p>
                 </div>
-                <div className={`rounded-full px-3 py-1 text-sm ${isDark ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>
+                <div className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-sm ${isDark ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>
                   Online now
                 </div>
               </div>
             </div>
-            <div ref={messageListRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+            <div ref={messageListRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-4">
               {messages.map((message) => {
                 const isOwn = message.username === username;
                 return (
                   <motion.div key={message._id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-[22px] px-4 py-3 shadow ${isOwn ? 'rounded-br-md bg-gradient-to-r from-cyan-500 to-violet-500 text-white' : isDark ? 'rounded-bl-md bg-slate-800 text-slate-100' : 'rounded-bl-md bg-slate-100 text-slate-900'}`}>
-                      <div className="mb-1 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.2em] opacity-80">
-                        <span>{message.username}</span>
-                        <div className="flex items-center gap-2">
+                    <div className={`max-w-[92%] rounded-[22px] px-4 py-3 shadow sm:max-w-[80%] ${isOwn ? 'rounded-br-md bg-gradient-to-r from-cyan-500 to-violet-500 text-white' : isDark ? 'rounded-bl-md bg-slate-800 text-slate-100' : 'rounded-bl-md bg-slate-100 text-slate-900'}`}>
+                      <div className="mb-1 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs uppercase tracking-[0.14em] opacity-80 sm:tracking-[0.2em]">
+                        <span className="min-w-0 max-w-[9rem] truncate sm:max-w-none">{message.username}</span>
+                        <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
                           <span>{formatTime(message.createdAt)}</span>
                           {isOwn ? (
                             <span
@@ -261,18 +289,18 @@ export const ChatScreen = () => {
                           ) : null}
                         </div>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-6">{message.message}</p>
+                      <p className="break-words whitespace-pre-wrap text-sm leading-6">{message.message}</p>
                     </div>
                   </motion.div>
                 );
               })}
             </div>
-            <div className={`border-t px-4 py-3 ${isDark ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50/80'}`}>
+            <div className={`border-t px-3 py-3 sm:px-4 ${isDark ? 'border-white/10 bg-slate-950/60' : 'border-slate-200 bg-slate-50/80'}`}>
               <div className={`rounded-[24px] border p-3 ${isDark ? 'border-white/10 bg-slate-900/80' : 'border-slate-200 bg-white'}`}>
-                <textarea value={draft} onChange={(event) => handleDraftChange(event.target.value)} onKeyDown={handleKeyDown} rows={3} className={`w-full resize-none border-none bg-transparent text-sm outline-none ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'}`} placeholder="Message everyone..." />
-                <div className="mt-3 flex items-center justify-between">
-                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Press Enter to send · Shift + Enter for a new line</p>
-                  <button onClick={() => void handleSend()} className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-violet-500 px-3 py-2 text-sm font-medium text-white">
+                <textarea value={draft} onChange={(event) => handleDraftChange(event.target.value)} onKeyDown={handleKeyDown} onBlur={() => emitTypingStop(true)} rows={3} className={`w-full resize-none border-none bg-transparent text-sm outline-none ${isDark ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'}`} placeholder="Message everyone..." />
+                <div className="mt-3 flex items-center justify-end gap-3 sm:justify-between">
+                  <p className={`hidden text-xs sm:block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Press Enter to send · Shift + Enter for a new line</p>
+                  <button onClick={() => void handleSend()} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-violet-500 px-4 py-2 text-sm font-medium text-white">
                     <ArrowUp size={16} /> Send
                   </button>
                 </div>
@@ -281,24 +309,24 @@ export const ChatScreen = () => {
           </section>
 
           <aside className={`rounded-[28px] border p-4 shadow-xl ${isDark ? 'border-white/10 bg-slate-900/70' : 'border-slate-200 bg-white/90'}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">Team Presence</h2>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold">Team Presence</h2>
                 <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Live connection and availability</p>
               </div>
-              <div className={`rounded-full px-3 py-1 text-xs ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>{sortedUsers.length} users</div>
+              <div className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>{sortedUsers.length} users</div>
             </div>
             <div className="mt-4 space-y-3">
               {sortedUsers.map((user) => (
-                <div key={user.username} className={`flex items-center justify-between rounded-2xl px-3 py-3 ${isDark ? 'bg-slate-800/80' : 'bg-slate-50'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-full font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-200 text-slate-800'}`}>{user.username.slice(0, 1).toUpperCase()}</div>
-                    <div>
-                      <p className="font-medium">{user.username}</p>
+                <div key={user.username} className={`flex items-center justify-between gap-3 rounded-2xl px-3 py-3 ${isDark ? 'bg-slate-800/80' : 'bg-slate-50'}`}>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-semibold ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-200 text-slate-800'}`}>{user.username.slice(0, 1).toUpperCase()}</div>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{user.username}</p>
                       <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{user.isOnline ? 'Online now' : 'Offline'}</p>
                     </div>
                   </div>
-                  <div className={`flex items-center gap-2 text-sm ${user.isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  <div className={`flex shrink-0 items-center gap-2 text-sm ${user.isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
                     <Circle size={10} fill="currentColor" />
                     {user.isOnline ? 'Live' : 'Away'}
                   </div>
