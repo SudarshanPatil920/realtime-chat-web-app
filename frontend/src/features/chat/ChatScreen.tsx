@@ -86,8 +86,10 @@ export const ChatScreen = () => {
 
   useEffect(() => {
     const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-    const socketUrl = env?.VITE_SOCKET_URL || undefined;
-    const socket = io(socketUrl, {
+    const explicitSocketUrl = env?.VITE_SOCKET_URL?.trim();
+    const apiUrl = env?.VITE_API_URL?.trim();
+    const derivedSocketUrl = explicitSocketUrl || (apiUrl && /^https?:\/\//i.test(apiUrl) ? apiUrl.replace(/\/api\/?$/i, '').replace(/\/$/, '') : undefined);
+    const socket = io(derivedSocketUrl, {
       auth: { username },
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,

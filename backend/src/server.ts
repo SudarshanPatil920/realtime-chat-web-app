@@ -18,20 +18,39 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const allowedOrigins = new Set(
-  (process.env.CLIENT_URL ?? 'http://localhost:5173')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-);
+const configuredOrigins = [
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+  process.env.VITE_APP_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+]
+  .flatMap((value) => (value ? value.split(',') : []))
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const allowedOrigins = new Set([
+  ...configuredOrigins,
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+]);
 
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    if (
-      !origin ||
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const isAllowedOrigin =
       allowedOrigins.has(origin) ||
-      (process.env.NODE_ENV !== 'production' && /^https?:\/\/localhost(:\d+)?$/.test(origin))
-    ) {
+      origin.endsWith('.vercel.app') ||
+      origin.endsWith('.netlify.app') ||
+      /^https?:\/\/localhost(:\d+)?$/.test(origin) ||
+      /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
+
+    if (isAllowedOrigin) {
       callback(null, true);
       return;
     }
